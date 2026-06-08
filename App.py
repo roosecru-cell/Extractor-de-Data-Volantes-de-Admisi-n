@@ -213,9 +213,10 @@ def make_excel(rows):
             cell.alignment = left if c_idx in (5, 7, 12) else center
 
     # Anchos de columna
+    from openpyxl.utils import get_column_letter
     widths = [12, 10, 15, 16, 28, 16, 28, 12, 24, 14, 12, 50]
     for i, w in enumerate(widths, start=1):
-        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
+        ws.column_dimensions[get_column_letter(i)].width = w
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -335,3 +336,4 @@ else:
     **Campos que se extraen:**
     `Fecha · Hora · N° Reporte · N° Póliza · Nombre · Teléfono · E-mail · Marca · Tipo · Modelo · Color · Descripción de Daños`
     """)
+
