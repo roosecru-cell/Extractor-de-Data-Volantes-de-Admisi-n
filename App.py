@@ -58,9 +58,18 @@ def parse_automoviles(text):
         r"NOMBRE\s*O\s*RAZ[OÓ]N\s*SOCIAL\s*DEL\s*CLIENTE\s*/[^\n]*\n([A-ZÁÉÍÓÚÑ ]{5,})", text
     )
 
-    # Teléfono (primer número de 10 dígitos con posible espacio)
-    tel = first_match(r"TEL[EÉ]FONO\s*/?\s*\n?([\d\s]{10,14})", text)
-    tel = re.sub(r"\s", "", tel)
+    # Teléfono: en la línea del nombre del cliente (después de NOMBRE O RAZÓN SOCIAL)
+    # Ej línea: "ADRIAN BENJAMIN CABRERA CRUZ 22 9320 4402"
+    tel = ""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if "NOMBRE O RAZ" in line.upper() and "CLIENTE" in line.upper():
+            # La siguiente línea tiene nombre + teléfono
+            next_line = lines[i+1] if i+1 < len(lines) else ""
+            m = re.search(r"(\d{2}\s\d{3,4}\s\d{4})", next_line)
+            if m:
+                tel = re.sub(r"\s", "", m.group(1))
+            break
 
     # Email
     email = first_match(r"E-?MAIL\s*/?\s*\n?([\w.\-+]+@[\w.\-]+)", text)
