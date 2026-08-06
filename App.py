@@ -3,16 +3,13 @@ import pdfplumber
 import re
 import io
 from openpyxl import Workbook
-from openpyxl.styles import (
-    PatternFill, Font, Alignment, Border, Side
-)
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
-# ── Colores Quálitas ──────────────────────────────────────────────────────────
-TEAL   = "FF006B6B"   # encabezado oscuro
-LTEAL  = "FFE0F4F4"   # fila par
-WHITE  = "FFFFFFFF"
-RED    = "FFC00000"   # acento
-GRAY   = "FF595959"
+TEAL  = "FF006B6B"
+LTEAL = "FFE0F4F4"
+WHITE = "FFFFFFFF"
+RED   = "FFC00000"
 
 COLS = [
     "Fecha", "Hora", "N° Reporte", "N° Póliza",
@@ -21,210 +18,225 @@ COLS = [
     "Descripción de Daños",
 ]
 
-# ── Helpers de extracción ─────────────────────────────────────────────────────
+MARCAS = (
+    "HONDA|NISSAN|MAZDA|FORD|CHEVROLET|KIA|TOYOTA|VW|VOLKSWAGEN|CHRYSLER|DODGE|JEEP|"
+    "RAM|SEAT|RENAULT|MITSUBISHI|SUZUKI|SUBARU|VOLVO|BMW|MERCEDES|AUDI|PEUGEOT|FIAT|"
+    "ACURA|INFINITI|LEXUS|CADILLAC|BUICK|GMC|LINCOLN|HYUNDAI|CHERY|MG|BYD|MINI|LAND"
+)
+COLORES = (
+    "NEGRO|BLANCO|ROJO|AZUL|GRIS|PLATA|PLATEADO|VERDE|AMARILLO|NARANJA|"
+    "CAFE|CAFÉ|MORADO|BEIGE|VINO|DORADO|ROSA|GUINDA|BRONCE|PERLA"
+)
 
 def clean(txt):
     return re.sub(r"\s+", " ", txt or "").strip()
-
 
 def first_match(pattern, text, group=1, flags=re.IGNORECASE):
     m = re.search(pattern, text, flags)
     return clean(m.group(group)) if m else ""
 
-
-# ── Formato 1: Orden de Admisión Automóviles ──────────────────────────────────
-
-def parse_automoviles(text):
-    # Fecha
-    fecha = first_match(
-        r"FECHA\s*/\s*[^/\n]*?\s*(\d{2}/\d{2}/\d{4})", text
-    ) or first_match(r"(\d{2}/\d{2}/\d{4})", text)
-
-    # Hora
-    hora = first_match(r"(\d{1,2}:\d{2})\s*HRS", text)
-
-    # Reporte
-    reporte = first_match(r"N[°º]\.\s*REPORTE\s+(\d+)", text)
-
-    # Póliza  (primera secuencia larga de dígitos en la línea de póliza)
-    poliza = first_match(
-        r"N[°º]\s*DE\s*P[OÓ]LIZA[^/\n]*/[^/\n]*/\s*(\d+)", text
-    ) or first_match(r"(\d{10,})", text)
-
-    # Nombre asegurado
-    nombre = first_match(
-        r"(?:ASEGURADO|TERCERO\s*Q)\s*/?\s*\n([A-ZÁÉÍÓÚÑ ]{5,})", text
-    ) or first_match(
-        r"NOMBRE\s*O\s*RAZ[OÓ]N\s*SOCIAL\s*DEL\s*CLIENTE\s*/[^\n]*\n([A-ZÁÉÍÓÚÑ ]{5,})", text
-    )
-
-    # Teléfono: en la línea del nombre del cliente (después de NOMBRE O RAZÓN SOCIAL)
-    # Ej línea: "ADRIAN BENJAMIN CABRERA CRUZ 22 9320 4402"
-    tel = ""
-    lines = text.split("\n")
-    for i, line in enumerate(lines):
-        if "NOMBRE O RAZ" in line.upper() and "CLIENTE" in line.upper():
-            # La siguiente línea tiene nombre + teléfono
-            next_line = lines[i+1] if i+1 < len(lines) else ""
-            m = re.search(r"(\d{2}\s\d{3,4}\s\d{4})", next_line)
-            if m:
-                tel = re.sub(r"\s", "", m.group(1))
+def parse_automoviles(text, lines):
+    fecha = hora = poliza = ""
+    for line in lines:
+        mf = re.search(r"(\d{2}/\d{2}/\d{4})", line)
+        mh = re.search(r"(\d{1,2}:\d{2})\s*HRS", line, re.IGNORECASE)
+        if mf and mh:
+            fecha = mf.group(1)
+            hora  = mh.group(1) + " HRS"
+            mp = re.search(r"\s(\d{10})\s+\d{6}\s+\d{4}", line)
+            if mp:
+                poliza = mp.group(1)
             break
 
-    # Email
-    email = first_match(r"E-?MAIL\s*/?\s*\n?([\w.\-+]+@[\w.\-]+)", text)
-
-    # Vehículo
-    marca = first_match(r"MARCA\s*/[^\n]*\n(\w+)", text)
-    tipo  = first_match(r"TIPO\s*/[^\n]*\n([A-Z0-9 ]+)", text)
-    modelo= first_match(r"MODELO\s*\([AÑO]+\)\s*/[^\n]*\n(\d{4})", text)
-    color = first_match(r"COLOR\s*\n([A-ZÁÉÍÓÚÑ]+)", text)
-
-    # Descripción de daños
-    desc  = first_match(
-        r"DESCRIPCI[OÓ]N\s*DE\s*DA[ÑN]OS\s*A\s*REPARAR[^\n]*\n(.+?)(?:\n[A-Z]{2,}|\Z)",
-        text, flags=re.IGNORECASE | re.DOTALL
-    )
-
-    return {
-        "Fecha": fecha, "Hora": hora, "N° Reporte": reporte,
-        "N° Póliza": poliza, "Nombre": nombre,
-        "Teléfono": tel, "E-mail": email,
-        "Marca": marca, "Tipo": tipo, "Modelo (Año)": modelo,
-        "Color": color, "Descripción de Daños": desc,
-    }
-
-
-# ── Formato 2: Orden de Admisión Ajuste Express ───────────────────────────────
-
-def parse_express(text):
-    # Fecha  (formato YYYY-MM-DD o DD/MM/YYYY)
-    fecha = first_match(r"FECHA\s+(\d{4}-\d{2}-\d{2})", text)
-    if fecha:
-        # Convertir a DD/MM/YYYY
-        parts = fecha.split("-")
-        fecha = f"{parts[2]}/{parts[1]}/{parts[0]}"
-
-    # Hora → no existe en Express
-    hora = ""
-
-    # Reporte / Siniestro
     reporte = first_match(r"N[°º]\.\s*REPORTE\s+(\d+)", text)
 
-    # Póliza → no presente en Express
-    poliza = ""
+    nombre = tel = ""
+    for i, line in enumerate(lines):
+        if "NOMBRE O RAZ" in line.upper() and "CLIENTE" in line.upper():
+            nxt = lines[i + 1] if i + 1 < len(lines) else ""
+            mt = re.search(r"(\d{2}\s\d{3,4}\s\d{4})\s*$", nxt)
+            if mt:
+                tel    = re.sub(r"\s", "", mt.group(1))
+                nombre = clean(nxt[:mt.start()])
+            else:
+                nombre = clean(nxt)
+            break
 
-    # Nombre asegurado (firma del conductor)
-    nombre = first_match(
-        r"FIRMA\s*DEL\s*CONDUCTOR\s*ASEGURADO?\s*\n([A-ZÁÉÍÓÚÑ ]{5,})", text
-    ) or first_match(r"ASEGURADO\s*\n([A-ZÁÉÍÓÚÑ ]{5,})", text)
-
-    # Teléfono / Email → no presentes
-    tel   = ""
     email = ""
+    for i, line in enumerate(lines):
+        if "E-MAIL" in line.upper() and i+1 < len(lines):
+            nxt = lines[i+1].strip()
+            m = re.search(r"([\w.\-+]+@[\w.\-]+\.\w+)", nxt)
+            if m and "qualitas" not in m.group(1).lower():
+                email = m.group(1)
+                break
 
-    # Vehículo
-    marca  = first_match(r"^(MAZDA|FORD|CHEVROLET|KIA|NISSAN|TOYOTA|VOLKSWAGEN|HONDA|HYUNDAI|CHRYSLER|DODGE|JEEP|RAM|SEAT|RENAULT|MITSUBISHI|SUZUKI|SUBARU|VOLVO|BMW|MERCEDES|AUDI|PEUGEOT|FIAT|ACURA|INFINITI|LEXUS|CADILLAC|BUICK|GMC|LINCOLN)\b", text, flags=re.MULTILINE)
-    tipo   = ""
-    modelo = ""
-    color  = ""
+    marca = tipo = modelo = color = ""
+    for line in lines:
+        m = re.match(
+            rf"^({MARCAS})\s+(.+?)\s+(\d{{4}})\s*$",
+            line.strip(), re.IGNORECASE
+        )
+        if m:
+            marca  = m.group(1).upper()
+            tipo_raw = clean(m.group(2))
+            # Quitar la marca si se repite al inicio del tipo (ej: "SUZUKI SWIFT" -> "SWIFT BOOSTERJET")
+            if tipo_raw.upper().startswith(marca):
+                tipo = tipo_raw[len(marca):].strip()
+            else:
+                tipo = tipo_raw
+            modelo = m.group(3)
+            break
 
-    # Buscar bloque de tabla vehículo
-    veh_m = re.search(
-        r"(MAZDA|FORD|CHEVROLET|KIA|NISSAN|TOYOTA|VOLKSWAGEN|HONDA|HYUNDAI|CHRYSLER|DODGE|JEEP|RAM|SEAT|RENAULT|MITSUBISHI|SUZUKI|SUBARU|VOLVO|BMW|MERCEDES|AUDI|PEUGEOT|FIAT|ACURA|INFINITI|LEXUS|CADILLAC|BUICK|GMC|LINCOLN)\s+([A-Z0-9 ]+?)\s+(\d{4})\s+\d",
-        text, re.IGNORECASE
-    )
-    if veh_m:
-        marca  = veh_m.group(1).strip()
-        tipo   = veh_m.group(2).strip()
-        modelo = veh_m.group(3).strip()
+    for line in lines:
+        if "COLOR" in line.upper():
+            m = re.search(rf"COLOR\s+(?:/COLOR\s+)?({COLORES})\b", line, re.IGNORECASE)
+            if m:
+                color = m.group(1).upper()
+                break
 
-    color_m = re.search(r"(NEGRO|BLANCO|ROJO|AZUL|GRIS|PLATA|PLATEADO|VERDE|AMARILLO|NARANJA|CAFE|CAFÉ|MORADO|BEIGE|VINO|DORADO|ROSA)\b", text, re.IGNORECASE)
-    if color_m:
-        color = color_m.group(1).upper()
+    desc = ""
+    for i, line in enumerate(lines):
+        if "DESCRIPCI" in line.upper() and "REPARAR" in line.upper():
+            parts = []
+            for j in range(i + 1, min(i + 6, len(lines))):
+                l = re.sub(r"\*\*.*?\*\*", "", lines[j]).strip()
+                if not l or "VÁLIDO" in l.upper() or "VALID" in l.upper():
+                    break
+                parts.append(l)
+            desc = " ".join(parts)
+            break
 
-    # Descripción de daños
-    desc = first_match(
-        r"Descripci[oó]n\s*de\s*da[ñn]os\s*\n(.+?)(?:\nDa[ñn]os\s*Preexistentes|\Z)",
-        text, flags=re.IGNORECASE | re.DOTALL
-    )
+    return {"Fecha": fecha, "Hora": hora, "N° Reporte": reporte,
+            "N° Póliza": poliza, "Nombre": nombre, "Teléfono": tel,
+            "E-mail": email, "Marca": marca, "Tipo": tipo,
+            "Modelo (Año)": modelo, "Color": color, "Descripción de Daños": desc}
 
-    return {
-        "Fecha": fecha, "Hora": hora, "N° Reporte": reporte,
-        "N° Póliza": poliza, "Nombre": nombre,
-        "Teléfono": tel, "E-mail": email,
-        "Marca": marca, "Tipo": tipo, "Modelo (Año)": modelo,
-        "Color": color, "Descripción de Daños": desc,
-    }
+def parse_express(text, lines):
+    fecha = ""
+    m = re.search(r"FECHA\s+(\d{4}-\d{2}-\d{2})", text)
+    if m:
+        p = m.group(1).split("-")
+        fecha = f"{p[2]}/{p[1]}/{p[0]}"
 
+    reporte = first_match(r"N[°º]\.\s*REPORTE\s+(\d+)", text)
 
-# ── Detección de formato y parseo ─────────────────────────────────────────────
+    nombre = ""
+    for i, line in enumerate(lines):
+        if "FIRMA DEL CONDUCTOR" in line.upper():
+            # El nombre está en la misma línea antes de la firma del ajustador
+            # Formato: "DIANA RODRIGUEZ BERISTAIN CARLOS ALFREDO MARTINEZ MARTINEZ"
+            # Tomamos la línea anterior que sea solo nombre del conductor
+            cand = lines[i - 1] if i > 0 else ""
+            # Si la línea tiene más de ~35 chars puede mezclar dos nombres
+            # Intentar extraer solo el nombre del conductor de la misma línea "FIRMA DEL CONDUCTOR"
+            # que no existe, así que buscamos en la línea anterior
+            if re.search(r"[A-ZÁÉÍÓÚÑ]{3,}\s+[A-ZÁÉÍÓÚÑ]{3,}", cand):
+                words = cand.strip().split()
+                # Nombre típico mexicano: 3 palabras (nombre + 2 apellidos)
+                nombre = " ".join(words[:3]) if len(words) > 3 else cand.strip()
+            break
+
+    tel = ""
+    for line in lines:
+        if "CON DIRECCION" in line.upper() or "TELEFONO" in line.upper():
+            mt = re.search(r"(?:TELEFONO|TEL)[^\d]*([\d\s()\-\.ext]+\d)", line, re.IGNORECASE)
+            if mt:
+                digits = re.sub(r"[^\d]", "", mt.group(1))
+                tel = digits[:10]  # máximo 10 dígitos
+                break
+
+    marca = tipo = modelo = color = ""
+    for line in lines:
+        m2 = re.match(
+            rf"^({MARCAS})\s+(.+?)\s+(\d{{4}})\s+\d",
+            line.strip(), re.IGNORECASE
+        )
+        if m2:
+            marca  = m2.group(1).upper()
+            tipo_raw = clean(m2.group(2))
+            if tipo_raw.upper().startswith(marca):
+                tipo = tipo_raw[len(marca):].strip()
+            else:
+                tipo = tipo_raw
+            modelo = m2.group(3)
+            break
+
+    for line in lines:
+        m3 = re.search(
+            rf"[A-Z0-9]{{10,}}\s+({COLORES})\s+[A-Z0-9]+",
+            line, re.IGNORECASE
+        )
+        if m3:
+            color = m3.group(1).upper()
+            break
+
+    desc = ""
+    for i, line in enumerate(lines):
+        if "DESCRIPCI" in line.upper() and "DA" in line.upper():
+            parts = []
+            for j in range(i + 1, min(i + 5, len(lines))):
+                l = lines[j].strip()
+                if not l or "PREEX" in l.upper():
+                    break
+                parts.append(l)
+            desc = " ".join(parts)
+            break
+
+    return {"Fecha": fecha, "Hora": "", "N° Reporte": reporte,
+            "N° Póliza": "", "Nombre": nombre, "Teléfono": tel,
+            "E-mail": "", "Marca": marca, "Tipo": tipo,
+            "Modelo (Año)": modelo, "Color": color, "Descripción de Daños": desc}
 
 def extract_from_pdf(uploaded_file):
     with pdfplumber.open(uploaded_file) as pdf:
         text = "\n".join(p.extract_text() or "" for p in pdf.pages)
-
+    lines = text.split("\n")
     is_express = bool(re.search(r"AJUSTE\s*EXPRESS", text, re.IGNORECASE))
-    data = parse_express(text) if is_express else parse_automoviles(text)
+    data = parse_express(text, lines) if is_express else parse_automoviles(text, lines)
     data["_tipo"] = "Express" if is_express else "Automóviles"
-    data["_texto"] = text
     return data
-
-
-# ── Generación de Excel ───────────────────────────────────────────────────────
 
 def make_excel(rows):
     wb = Workbook()
     ws = wb.active
     ws.title = "Admisiones Quálitas"
-
-    # Estilos
-    hdr_fill  = PatternFill("solid", fgColor=TEAL)
-    hdr_font  = Font(bold=True, color="FFFFFFFF", name="Arial", size=10)
-    row_even  = PatternFill("solid", fgColor=LTEAL)
-    row_odd   = PatternFill("solid", fgColor=WHITE)
-    border    = Border(
+    hdr_fill = PatternFill("solid", fgColor=TEAL)
+    hdr_font = Font(bold=True, color="FFFFFFFF", name="Arial", size=10)
+    row_even = PatternFill("solid", fgColor=LTEAL)
+    row_odd  = PatternFill("solid", fgColor=WHITE)
+    border   = Border(
         left=Side(style="thin", color="FFCCCCCC"),
         right=Side(style="thin", color="FFCCCCCC"),
         top=Side(style="thin", color="FFCCCCCC"),
         bottom=Side(style="thin", color="FFCCCCCC"),
     )
-    center    = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    left      = Alignment(horizontal="left",   vertical="center", wrap_text=True)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left   = Alignment(horizontal="left",   vertical="center", wrap_text=True)
 
-    # Título
     ws.merge_cells("A1:L1")
-    title_cell = ws["A1"]
-    title_cell.value = "Órdenes de Admisión — Quálitas"
-    title_cell.font  = Font(bold=True, color="FFFFFFFF", name="Arial", size=13)
-    title_cell.fill  = PatternFill("solid", fgColor=RED)
-    title_cell.alignment = center
+    tc = ws["A1"]
+    tc.value     = "Órdenes de Admisión — Quálitas"
+    tc.font      = Font(bold=True, color="FFFFFFFF", name="Arial", size=13)
+    tc.fill      = PatternFill("solid", fgColor=RED)
+    tc.alignment = center
     ws.row_dimensions[1].height = 28
 
-    # Encabezados
-    for col_idx, col_name in enumerate(COLS, start=1):
-        cell = ws.cell(row=2, column=col_idx, value=col_name)
-        cell.fill      = hdr_fill
-        cell.font      = hdr_font
-        cell.alignment = center
-        cell.border    = border
+    for ci, col in enumerate(COLS, 1):
+        c = ws.cell(row=2, column=ci, value=col)
+        c.fill = hdr_fill; c.font = hdr_font
+        c.alignment = center; c.border = border
     ws.row_dimensions[2].height = 22
 
-    # Datos
-    for r_idx, row in enumerate(rows, start=3):
-        fill = row_even if r_idx % 2 == 0 else row_odd
-        for c_idx, col in enumerate(COLS, start=1):
-            val  = row.get(col, "")
-            cell = ws.cell(row=r_idx, column=c_idx, value=val)
-            cell.fill      = fill
-            cell.border    = border
-            cell.font      = Font(name="Arial", size=9)
-            cell.alignment = left if c_idx in (5, 7, 12) else center
+    for ri, row in enumerate(rows, 3):
+        fill = row_even if ri % 2 == 0 else row_odd
+        for ci, col in enumerate(COLS, 1):
+            c = ws.cell(row=ri, column=ci, value=row.get(col, ""))
+            c.fill = fill; c.border = border
+            c.font = Font(name="Arial", size=9)
+            c.alignment = left if ci in (5, 7, 12) else center
 
-    # Anchos de columna
-    from openpyxl.utils import get_column_letter
-    widths = [12, 10, 15, 16, 28, 16, 28, 12, 24, 14, 12, 50]
-    for i, w in enumerate(widths, start=1):
+    for i, w in enumerate([12,10,15,16,28,16,28,12,24,14,12,50], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
     buf = io.BytesIO()
@@ -232,117 +244,74 @@ def make_excel(rows):
     buf.seek(0)
     return buf
 
-
-# ── UI Streamlit ──────────────────────────────────────────────────────────────
-
-st.set_page_config(
-    page_title="Admisiones Quálitas",
-    page_icon="🚗",
-    layout="wide",
-)
-
-# CSS personalizado
+# ── UI ────────────────────────────────────────────────────────────────────────
+st.set_page_config(page_title="Admisiones Quálitas", page_icon="🚗", layout="wide")
 st.markdown("""
 <style>
-    .main { background-color: #F5FAFA; }
-    h1 { color: #006B6B; }
-    .stButton > button {
-        background-color: #006B6B;
-        color: white;
-        border-radius: 6px;
-        font-weight: bold;
-        padding: 0.4rem 1.2rem;
-    }
-    .stButton > button:hover { background-color: #004F4F; }
-    .block-container { padding-top: 2rem; }
-    .stDataFrame { border-radius: 8px; }
-</style>
-""", unsafe_allow_html=True)
+.main{background-color:#F5FAFA}h1{color:#006B6B}
+.stButton>button{background-color:#006B6B;color:white;border-radius:6px;font-weight:bold;padding:.4rem 1.2rem}
+.stButton>button:hover{background-color:#004F4F}.block-container{padding-top:2rem}
+</style>""", unsafe_allow_html=True)
 
-# Encabezado
-col_logo, col_title = st.columns([1, 6])
-with col_logo:
-    st.markdown("## 🚗")
-with col_title:
+c1, c2 = st.columns([1,6])
+with c1: st.markdown("## 🚗")
+with c2:
     st.title("Extractor de Órdenes de Admisión — Quálitas")
-    st.caption("Sube una o más órdenes en PDF y descarga los datos en Excel")
-
+    st.caption("Sube una o más órdenes en PDF (Automóviles o Ajuste Express) y descarga los datos en Excel")
 st.divider()
 
 uploaded = st.file_uploader(
-    "Arrastra aquí tus PDFs de Quálitas",
-    type=["pdf"],
+    "Arrastra aquí tus PDFs de Quálitas", type=["pdf"],
     accept_multiple_files=True,
-    help="Se aceptan tanto 'Orden de Admisión Automóviles' como 'Ajuste Express'",
+    help="Formato Orden de Admisión Automóviles y Ajuste Express"
 )
 
 if uploaded:
-    rows   = []
-    errors = []
-
+    rows, errors = [], []
     with st.spinner("Procesando PDFs…"):
         for f in uploaded:
             try:
                 data = extract_from_pdf(f)
-                tipo = data.pop("_tipo", "")
-                data.pop("_texto", None)
-                # Renombrar clave interna al nombre de columna
-                row = {col: data.get(col, "") for col in COLS}
+                tipo = data.pop("_tipo","")
+                row  = {col: data.get(col,"") for col in COLS}
                 row["_tipo"] = tipo
                 rows.append(row)
             except Exception as e:
                 errors.append(f"**{f.name}**: {e}")
 
-    if errors:
-        for err in errors:
-            st.error(err)
+    for err in errors: st.error(err)
 
     if rows:
         st.success(f"✅ {len(rows)} PDF(s) procesados correctamente")
-
-        # Tabla previa
         import pandas as pd
         df = pd.DataFrame(rows)
-
-        # Indicador de tipo
         tipo_col = df.pop("_tipo")
         st.markdown("#### Vista previa")
-        st.dataframe(
-            df,
-            use_container_width=True,
-            height=min(200 + len(rows) * 38, 500),
-        )
+        st.dataframe(df, use_container_width=True, height=min(200+len(rows)*38,500))
 
-        # Detalle expandible por orden
         with st.expander("🔍 Ver detalle por orden"):
             for i, row in enumerate(rows):
-                t = tipo_col.iloc[i]
-                badge = "🔵 Automóviles" if t == "Automóviles" else "🟣 Ajuste Express"
-                st.markdown(f"**{badge} — Reporte {row.get('N° Reporte', i+1)}**")
-                cols = st.columns(3)
-                items = [(k, v) for k, v in row.items() if k != "_tipo"]
-                for j, (k, v) in enumerate(items):
-                    cols[j % 3].markdown(f"- **{k}:** {v or '—'}")
+                badge = "🔵 Automóviles" if tipo_col.iloc[i]=="Automóviles" else "🟣 Ajuste Express"
+                st.markdown(f"**{badge} — Reporte {row.get('N° Reporte',i+1)}**")
+                c3 = st.columns(3)
+                for j,(k,v) in enumerate([(k,v) for k,v in row.items() if k!="_tipo"]):
+                    c3[j%3].markdown(f"- **{k}:** {v or '—'}")
                 st.divider()
 
-        # Botón de descarga Excel
         excel_buf = make_excel(rows)
         st.download_button(
-            label="⬇️  Descargar Excel",
-            data=excel_buf,
+            label="⬇️  Descargar Excel", data=excel_buf,
             file_name="admisiones_qualitas.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
-
 else:
     st.info("👆 Sube uno o más PDFs de Quálitas para comenzar.")
     st.markdown("""
-    **Formatos compatibles:**
-    - 📄 Orden de Admisión Automóviles
-    - 📄 Orden de Admisión Ajuste Express
+**Formatos compatibles:**
+- 📄 Orden de Admisión Automóviles
+- 📄 Orden de Admisión Ajuste Express
 
-    **Campos que se extraen:**
-    `Fecha · Hora · N° Reporte · N° Póliza · Nombre · Teléfono · E-mail · Marca · Tipo · Modelo · Color · Descripción de Daños`
-    """)
-
+**Campos extraídos:**
+`Fecha · Hora · N° Reporte · N° Póliza · Nombre · Teléfono · E-mail · Marca · Tipo · Modelo · Color · Descripción de Daños`
+""")
