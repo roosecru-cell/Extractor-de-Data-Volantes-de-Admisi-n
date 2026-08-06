@@ -14,7 +14,7 @@ RED   = "FFC00000"
 COLS = [
     "Fecha", "Hora", "N° Reporte", "N° Póliza",
     "Nombre", "Teléfono", "E-mail",
-    "Marca", "Tipo", "Modelo (Año)", "Color",
+    "Marca", "Tipo", "Modelo (Año)", "Color", "Placas",
     "Descripción de Daños",
 ]
 
@@ -107,10 +107,20 @@ def parse_automoviles(text, lines):
             desc = " ".join(parts)
             break
 
+    # Placas Automóviles: "SERIE PLACAS /LICENSE PLATES XYZ123 AUTOMATIC MANUAL"
+    placas = ""
+    for line in lines:
+        if "PLACAS" in line.upper() and "LICENSE" in line.upper():
+            m = re.search(r"PLATES\s+([A-Z0-9]{1,10})\s", line, re.IGNORECASE)
+            if m:
+                placas = m.group(1).upper()
+                break
+
     return {"Fecha": fecha, "Hora": hora, "N° Reporte": reporte,
             "N° Póliza": poliza, "Nombre": nombre, "Teléfono": tel,
             "E-mail": email, "Marca": marca, "Tipo": tipo,
-            "Modelo (Año)": modelo, "Color": color, "Descripción de Daños": desc}
+            "Modelo (Año)": modelo, "Color": color, "Placas": placas,
+            "Descripción de Daños": desc}
 
 def parse_express(text, lines):
     fecha = ""
@@ -183,10 +193,26 @@ def parse_express(text, lines):
             desc = " ".join(parts)
             break
 
+    # Placas Express: línea siguiente a "N°. DE SERIE COLOR PLACAS TRANSMISIÓN"
+    placas = ""
+    for i, line in enumerate(lines):
+        if "PLACAS" in line.upper() and "SERIE" in line.upper() and i+1 < len(lines):
+            data_line = lines[i+1]
+            # Formato: "SERIE COLOR PLACAS TRANSMISION"
+            # COLOR es 1 palabra, PLACAS es alfanumérico 5-8 chars, TRANSMISION al final
+            m = re.search(
+                rf"[A-Z0-9]{{10,}}\s+(?:{COLORES})\s+([A-Z0-9]{{3,10}})\s",
+                data_line, re.IGNORECASE
+            )
+            if m:
+                placas = m.group(1).upper()
+            break
+
     return {"Fecha": fecha, "Hora": "", "N° Reporte": reporte,
             "N° Póliza": "", "Nombre": nombre, "Teléfono": tel,
             "E-mail": "", "Marca": marca, "Tipo": tipo,
-            "Modelo (Año)": modelo, "Color": color, "Descripción de Daños": desc}
+            "Modelo (Año)": modelo, "Color": color, "Placas": placas,
+            "Descripción de Daños": desc}
 
 def extract_from_pdf(uploaded_file):
     with pdfplumber.open(uploaded_file) as pdf:
@@ -214,7 +240,7 @@ def make_excel(rows):
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
     left   = Alignment(horizontal="left",   vertical="center", wrap_text=True)
 
-    ws.merge_cells("A1:L1")
+    ws.merge_cells("A1:M1")
     tc = ws["A1"]
     tc.value     = "Órdenes de Admisión — Quálitas"
     tc.font      = Font(bold=True, color="FFFFFFFF", name="Arial", size=13)
@@ -234,9 +260,9 @@ def make_excel(rows):
             c = ws.cell(row=ri, column=ci, value=row.get(col, ""))
             c.fill = fill; c.border = border
             c.font = Font(name="Arial", size=9)
-            c.alignment = left if ci in (5, 7, 12) else center
+            c.alignment = left if ci in (5, 7, 13) else center
 
-    for i, w in enumerate([12,10,15,16,28,16,28,12,24,14,12,50], 1):
+    for i, w in enumerate([12,10,15,16,28,16,28,12,24,14,12,12,50], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
     buf = io.BytesIO()
