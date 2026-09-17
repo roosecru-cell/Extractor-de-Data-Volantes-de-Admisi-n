@@ -15,7 +15,7 @@ COLS = [
     "Fecha", "Hora", "N° Reporte", "N° Póliza",
     "Nombre", "Teléfono", "E-mail",
     "Marca", "Tipo", "Modelo (Año)", "Color", "Placas",
-    "Descripción de Daños",
+    "Aplica Deducible", "Descripción de Daños",
 ]
 
 MARCAS = (
@@ -116,11 +116,29 @@ def parse_automoviles(text, lines):
                 placas = m.group(1).upper()
                 break
 
+    # Aplica Deducible — Automóviles: detectar por línea de monto
+    # "$ 267,000 5.00 % $ 13350" → SI (monto + cantidad final)
+    # "$ V. COM. 3.00 % $"       → SI (valor comercial con %)
+    # "$ V. 5.00 % $"            → NO (valor factura sin cantidad)
+    # "$ % $"                    → NO (vacío)
+    aplica_ded = ""
+    for line in lines:
+        s = line.strip()
+        if not s.startswith("$"): continue
+        if re.match(r"^\$\s+\d[\d,\.]+\s+[\d,\.]+\s*%\s+\$\s+[\d,\.]+", s):
+            aplica_ded = "SI"; break
+        if re.search(r"V\.\s*COM\.?\s+[\d,\.]+\s*%", s):
+            aplica_ded = "SI"; break
+        if re.match(r"^\$\s+V[\.\s]", s) and re.search(r"%\s*\$\s*$", s):
+            aplica_ded = "NO"; break
+        if re.match(r"^\$\s+%\s+\$\s*$", s):
+            aplica_ded = "NO"; break
+
     return {"Fecha": fecha, "Hora": hora, "N° Reporte": reporte,
             "N° Póliza": poliza, "Nombre": nombre, "Teléfono": tel,
             "E-mail": email, "Marca": marca, "Tipo": tipo,
             "Modelo (Año)": modelo, "Color": color, "Placas": placas,
-            "Descripción de Daños": desc}
+            "Aplica Deducible": aplica_ded, "Descripción de Daños": desc}
 
 def parse_express(text, lines):
     fecha = ""
@@ -208,11 +226,24 @@ def parse_express(text, lines):
                 placas = m.group(1).upper()
             break
 
+    # Aplica Deducible — Express: X explícita en texto
+    # "NO SI X FIJO % ADM X" → SI aplica
+    # "NO X SI FIJO % X ADM" → NO aplica
+    aplica_ded = ""
+    for line in lines:
+        if ("NO" in line.upper() and "SI" in line.upper() and
+                ("FIJO" in line.upper() or "ADM" in line.upper())):
+            if re.search(r"NO\s+X\s+SI", line, re.IGNORECASE):
+                aplica_ded = "NO"
+            elif re.search(r"NO\s+SI\s+X", line, re.IGNORECASE):
+                aplica_ded = "SI"
+            break
+
     return {"Fecha": fecha, "Hora": "", "N° Reporte": reporte,
             "N° Póliza": "", "Nombre": nombre, "Teléfono": tel,
             "E-mail": "", "Marca": marca, "Tipo": tipo,
             "Modelo (Año)": modelo, "Color": color, "Placas": placas,
-            "Descripción de Daños": desc}
+            "Aplica Deducible": aplica_ded, "Descripción de Daños": desc}
 
 def extract_from_pdf(uploaded_file):
     with pdfplumber.open(uploaded_file) as pdf:
@@ -240,7 +271,7 @@ def make_excel(rows):
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
     left   = Alignment(horizontal="left",   vertical="center", wrap_text=True)
 
-    ws.merge_cells("A1:M1")
+    ws.merge_cells("A1:N1")
     tc = ws["A1"]
     tc.value     = "Órdenes de Admisión — Quálitas"
     tc.font      = Font(bold=True, color="FFFFFFFF", name="Arial", size=13)
@@ -260,9 +291,9 @@ def make_excel(rows):
             c = ws.cell(row=ri, column=ci, value=row.get(col, ""))
             c.fill = fill; c.border = border
             c.font = Font(name="Arial", size=9)
-            c.alignment = left if ci in (5, 7, 13) else center
+            c.alignment = left if ci in (5, 7, 14) else center
 
-    for i, w in enumerate([12,10,15,16,28,16,28,12,24,14,12,12,50], 1):
+    for i, w in enumerate([12,10,15,16,28,16,28,12,24,14,12,12,14,50], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
     buf = io.BytesIO()
