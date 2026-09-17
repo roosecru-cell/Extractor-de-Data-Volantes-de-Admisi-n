@@ -13,11 +13,11 @@ RED   = "FFC00000"
 
 COLS = [
     "N° Reporte", "N° Póliza",
-    "Marca", "Tipo", "Modelo (Año)",
+    "Vehículo", "Modelo (Año)",
     "Aplica Deducible", "Placas",
     "Nombre", "Teléfono", "E-mail",
     "Fecha", "Descripción de Daños",
-    "Hora", "Color",
+    "Hora",
 ]
 
 MARCAS = (
@@ -136,10 +136,12 @@ def parse_automoviles(text, lines):
         if re.match(r"^\$\s+%\s+\$\s*$", s):
             aplica_ded = "NO"; break
 
+    tipo = re.sub(r"^SI\s+", "", tipo, flags=re.IGNORECASE).strip()
+    vehiculo = " ".join(filter(None, [marca, tipo, color])).strip()
     return {"Fecha": fecha, "Hora": hora, "N° Reporte": reporte,
             "N° Póliza": poliza, "Nombre": nombre, "Teléfono": tel,
-            "E-mail": email, "Marca": marca, "Tipo": tipo,
-            "Modelo (Año)": modelo, "Color": color, "Placas": placas,
+            "E-mail": email, "Vehículo": vehiculo,
+            "Modelo (Año)": modelo, "Placas": placas,
             "Aplica Deducible": aplica_ded, "Descripción de Daños": desc}
 
 def parse_express(text, lines):
@@ -241,10 +243,12 @@ def parse_express(text, lines):
                 aplica_ded = "SI"
             break
 
+    tipo = re.sub(r"^SI\s+", "", tipo, flags=re.IGNORECASE).strip()
+    vehiculo = " ".join(filter(None, [marca, tipo, color])).strip()
     return {"Fecha": fecha, "Hora": "", "N° Reporte": reporte,
             "N° Póliza": "", "Nombre": nombre, "Teléfono": tel,
-            "E-mail": "", "Marca": marca, "Tipo": tipo,
-            "Modelo (Año)": modelo, "Color": color, "Placas": placas,
+            "E-mail": "", "Vehículo": vehiculo,
+            "Modelo (Año)": modelo, "Placas": placas,
             "Aplica Deducible": aplica_ded, "Descripción de Daños": desc}
 
 def extract_from_pdf(uploaded_file):
@@ -273,7 +277,7 @@ def make_excel(rows):
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
     left   = Alignment(horizontal="left",   vertical="center", wrap_text=True)
 
-    ws.merge_cells("A1:N1")
+    ws.merge_cells("A1:L1")
     tc = ws["A1"]
     tc.value     = "Órdenes de Admisión — Quálitas"
     tc.font      = Font(bold=True, color="FFFFFFFF", name="Arial", size=13)
@@ -293,9 +297,9 @@ def make_excel(rows):
             c = ws.cell(row=ri, column=ci, value=row.get(col, ""))
             c.fill = fill; c.border = border
             c.font = Font(name="Arial", size=9)
-            c.alignment = left if ci in (8, 10, 12) else center
+            c.alignment = left if ci in (7, 9, 11) else center
 
-    for i, w in enumerate([15,16,12,24,14,14,12,28,16,28,12,50,10,12], 1):
+    for i, w in enumerate([15,16,28,14,14,12,28,16,28,12,50,10], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
     buf = io.BytesIO()
@@ -374,4 +378,5 @@ else:
 **Campos extraídos:**
 `Fecha · Hora · N° Reporte · N° Póliza · Nombre · Teléfono · E-mail · Marca · Tipo · Modelo · Color · Descripción de Daños`
 """)
+
 
