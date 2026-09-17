@@ -12,10 +12,12 @@ WHITE = "FFFFFFFF"
 RED   = "FFC00000"
 
 COLS = [
-    "Fecha", "Hora", "N° Reporte", "N° Póliza",
+    "N° Reporte", "N° Póliza",
+    "Marca", "Tipo", "Modelo (Año)",
+    "Aplica Deducible", "Placas",
     "Nombre", "Teléfono", "E-mail",
-    "Marca", "Tipo", "Modelo (Año)", "Color", "Placas",
-    "Aplica Deducible", "Descripción de Daños",
+    "Fecha", "Descripción de Daños",
+    "Hora", "Color",
 ]
 
 MARCAS = (
@@ -291,9 +293,9 @@ def make_excel(rows):
             c = ws.cell(row=ri, column=ci, value=row.get(col, ""))
             c.fill = fill; c.border = border
             c.font = Font(name="Arial", size=9)
-            c.alignment = left if ci in (5, 7, 14) else center
+            c.alignment = left if ci in (8, 10, 12) else center
 
-    for i, w in enumerate([12,10,15,16,28,16,28,12,24,14,12,12,14,50], 1):
+    for i, w in enumerate([15,16,12,24,14,14,12,28,16,28,12,50,10,12], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
     buf = io.BytesIO()
@@ -372,3 +374,4 @@ else:
 **Campos extraídos:**
 `Fecha · Hora · N° Reporte · N° Póliza · Nombre · Teléfono · E-mail · Marca · Tipo · Modelo · Color · Descripción de Daños`
 """)
+
