@@ -97,15 +97,25 @@ def parse_automoviles(text, lines):
                 color = m.group(1).upper()
                 break
 
+    # Frases de plantilla a excluir de la descripción
+    EXCLUIR = (
+        "IN CASE OF FLOOD", "EN CASO DE INUNDACIÓN", "NIVEL 1", "NIVEL 2", "NIVEL 3",
+        "LEVEL 1", "LEVEL 2", "LEVEL 3", "VÁLIDO", "VALID", "HASTA EL ESTRIBO",
+        "UP TO RUNNING", "POR DEBAJO", "BELOW THE CAR", "POR ARRIBA", "ABOVE THE CAR",
+        "POSSIBLE WORSENING", "POSIBLE AGRAVAMIENTO", "ALFOMBRA", "CLASHBOARD",
+        "TABLERO", "ESTRIBO", "DASHBOARD", "RUNNING BOARD",
+    )
     desc = ""
     for i, line in enumerate(lines):
         if "DESCRIPCI" in line.upper() and "REPARAR" in line.upper():
             parts = []
-            for j in range(i + 1, min(i + 6, len(lines))):
+            for j in range(i + 1, min(i + 8, len(lines))):
                 l = re.sub(r"\*\*.*?\*\*", "", lines[j]).strip()
-                if not l or "VÁLIDO" in l.upper() or "VALID" in l.upper():
-                    break
+                if not l: continue
+                if any(ex in l.upper() for ex in EXCLUIR): continue
+                if re.match(r"^\(", l): continue  # líneas de aclaración entre paréntesis
                 parts.append(l)
+                if len(parts) >= 3: break
             desc = " ".join(parts)
             break
 
@@ -203,14 +213,18 @@ def parse_express(text, lines):
             color = m3.group(1).upper()
             break
 
+    EXCLUIR_EX = (
+        "IN CASE OF FLOOD", "EN CASO DE INUNDACIÓN", "NIVEL 1", "NIVEL 2", "NIVEL 3",
+        "LEVEL 1", "LEVEL 2", "LEVEL 3", "VÁLIDO", "VALID",
+    )
     desc = ""
     for i, line in enumerate(lines):
         if "DESCRIPCI" in line.upper() and "DA" in line.upper():
             parts = []
-            for j in range(i + 1, min(i + 5, len(lines))):
+            for j in range(i + 1, min(i + 6, len(lines))):
                 l = lines[j].strip()
-                if not l or "PREEX" in l.upper():
-                    break
+                if not l or "PREEX" in l.upper(): break
+                if any(ex in l.upper() for ex in EXCLUIR_EX): continue
                 parts.append(l)
             desc = " ".join(parts)
             break
@@ -378,5 +392,4 @@ else:
 **Campos extraídos:**
 `Fecha · Hora · N° Reporte · N° Póliza · Nombre · Teléfono · E-mail · Marca · Tipo · Modelo · Color · Descripción de Daños`
 """)
-
 
